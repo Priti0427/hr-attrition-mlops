@@ -1,0 +1,33 @@
+# Experiments run by src/run_experiments.py. Each one replaces the "model"
+# section of config.yaml and can optionally drop extra columns.
+
+- name: logreg_baseline
+  model:
+    type: logistic_regression
+    params: {C: 1.0, max_iter: 2000, class_weight: balanced}
+
+- name: logreg_C0.1
+  model:
+    type: logistic_regression
+    params: {C: 0.1, max_iter: 2000, class_weight: balanced}
+
+- name: logreg_no_rate_cols
+  drop_extra: [DailyRate, HourlyRate, MonthlyRate]
+  model:
+    type: logistic_regression
+    params: {C: 1.0, max_iter: 2000, class_weight: balanced}
+
+- name: rf_200
+  model:
+    type: random_forest
+    params: {n_estimators: 200, max_depth: 8, min_samples_leaf: 3, class_weight: balanced}
+
+- name: rf_500_deep
+  model:
+    type: random_forest
+    params: {n_estimators: 500, max_depth: 14, class_weight: balanced_subsample}
+
+- name: gradient_boosting
+  model:
+    type: gradient_boosting
+    params: {n_estimators: 300, learning_rate: 0.05, max_depth: 3, subsample: 0.8}
