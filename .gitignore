@@ -1,0 +1,32 @@
+# data is tracked with DVC
+data/raw/*.csv
+*.csv
+
+# model files and training outputs
+models/
+*.joblib
+*.pkl
+reports/metrics.json
+reports/*.html
+reports/drift_summary_*.json
+
+# mlflow
+mlruns/
+mlartifacts/
+mlflow.db
+
+# dvc
+.dvc/cache/
+.dvc/tmp/
+
+# python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+
+# editors / os
+.vscode/
+.idea/
+.DS_Store

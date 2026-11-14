@@ -1,0 +1,48 @@
+# All settings for training. train.py reads everything from here.
+
+data:
+  path: data/raw/hr_attrition.csv
+  dvc_file: data/raw/hr_attrition.csv.dvc
+  target: Attrition
+  test_size: 0.2
+  random_state: 42
+  # constant columns and the employee id - no signal in them
+  drop_columns:
+    - EmployeeCount
+    - EmployeeNumber
+    - Over18
+    - StandardHours
+  categorical_columns:
+    - BusinessTravel
+    - Department
+    - EducationField
+    - Gender
+    - JobRole
+    - MaritalStatus
+    - OverTime
+
+model:
+  type: logistic_regression   # logistic_regression, random_forest, gradient_boosting
+  params:
+    C: 1.0
+    max_iter: 2000
+    class_weight: balanced
+
+# train.py exits with code 1 if the test metrics are below these
+thresholds:
+  roc_auc: 0.75
+  f1: 0.40
+  recall: 0.50
+
+mlflow:
+  tracking_uri: sqlite:///mlflow.db
+  experiment_name: hr-attrition
+
+output:
+  model_path: models/model.joblib
+  metrics_path: reports/metrics.json
+
+drift:
+  # monitor_drift.py exits with code 1 if more than this share of features drifted
+  share_threshold: 0.25
+  reports_dir: reports

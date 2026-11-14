@@ -1,0 +1,5 @@
+outs:
+- md5: 8bffa75e2a2c8608c3d8715d47cd3000
+  size: 236245
+  hash: md5
+  path: hr_attrition.csv
