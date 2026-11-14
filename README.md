@@ -12,7 +12,7 @@ IBM HR Analytics Employee Attrition & Performance - the same data as the Kaggle 
 - the original file has no missing values, so `scripts/make_dataset.py` blanks out 3-5% of the cells in six columns (MonthlyIncome, TotalWorkingYears, DistanceFromHome, EnvironmentSatisfaction, BusinessTravel, MaritalStatus) with a fixed seed
 - `EmployeeCount`, `StandardHours`, `Over18` are constant and `EmployeeNumber` is an id, so they get dropped (see `drop_columns` in the config)
 
-The CSV is tracked with DVC and is not in git. The DVC remote is a local folder `dvc-storage/` that lives inside the repo, so `dvc pull` works after cloning (and in CI) without any cloud credentials.
+The CSV is tracked with DVC and is not in git. The DVC remote is a local folder `dvc-storage/` that lives inside the repo, so `dvc pull` works after cloning (and in CI) without any cloud credentials. This is only done so the project is self-contained for review: it does mean DVC's content-addressed copy of the data ends up in git. On a real project the remote would be an S3/GCS/Azure bucket (`dvc remote add -d storage s3://bucket/path`) and `dvc-storage/` would not exist.
 
 ## Project layout
 
@@ -54,15 +54,19 @@ dvc pull
 python -m src.train --config configs/config.yaml
 ```
 
-Everything (paths, model, hyperparameters, thresholds) comes from `configs/config.yaml`. The script
+Everything (paths, model, hyperparameters, CV folds, thresholds) comes from `configs/config.yaml`. The script
 
-1. loads and cleans the data and does a stratified 80/20 split
-2. fits a sklearn pipeline (median / most-frequent imputation, scaling, one-hot encoding, model)
-3. logs the hyperparameters, the DVC md5 of the dataset, the test metrics and the model (`mlflow.sklearn.log_model`) to MLflow
-4. saves `models/model.joblib` and `reports/metrics.json`
-5. exits with code 1 if ROC AUC < 0.75, F1 < 0.40 or recall < 0.50
+1. loads and cleans the data and does a stratified 80/20 train/test split
+2. builds a sklearn pipeline (median / most-frequent imputation, scaling, one-hot encoding, model)
+3. runs 5-fold stratified cross-validation on the training split and logs the mean scores as `val_*` metrics
+4. fits the pipeline on the full training split, scores the test split once and logs the `test_*` metrics
+5. logs the hyperparameters, the DVC md5 of the dataset and the model (`mlflow.sklearn.log_model`) to MLflow
+6. saves `models/model.joblib` and `reports/metrics.json`
+7. exits with code 1 if the **validation** ROC AUC < 0.75, F1 < 0.40 or recall < 0.50
 
 Recall has its own threshold because missing a leaver costs more than a false alarm, and gradient boosting for example gets a good ROC AUC while catching very few leavers.
+
+The validation metrics are what experiments are compared on. The test split is only there for the final number of the chosen model, it is never used to pick between runs.
 
 ## Experiments
 
@@ -72,20 +76,26 @@ python -m src.compare_experiments    # ranks the runs, prints the best one
 mlflow ui --backend-store-uri sqlite:///mlflow.db
 ```
 
-Results on the 294 row test set (full table in [reports/experiment_comparison.md](reports/experiment_comparison.md)):
+Validation results, 5-fold CV on the 1176 row training split (full table in [reports/experiment_comparison.md](reports/experiment_comparison.md)):
 
-| run | model | ROC AUC | F1 | recall | passed thresholds |
+| run | model | val ROC AUC | val F1 | val recall | passed thresholds |
 |---|---|---|---|---|---|
-| logreg_no_rate_cols | logistic regression, without DailyRate/HourlyRate/MonthlyRate | **0.814** | 0.492 | 0.681 | yes |
-| gradient_boosting | 300 trees, lr 0.05, depth 3 | 0.814 | 0.394 | 0.277 | no |
-| logreg_C0.1 | logistic regression, C=0.1 | 0.811 | 0.500 | 0.681 | yes |
-| logreg_baseline | logistic regression, C=1.0 | 0.803 | 0.462 | 0.638 | yes |
-| rf_500_deep | random forest, 500 trees, depth 14 | 0.793 | 0.182 | 0.106 | no |
-| rf_200 | random forest, 200 trees, depth 8 | 0.784 | 0.519 | 0.574 | yes |
+| logreg_C0.1 | logistic regression, C=0.1 | **0.830** | 0.499 | 0.737 | yes |
+| logreg_no_rate_cols | logistic regression, without DailyRate/HourlyRate/MonthlyRate | 0.830 | 0.500 | 0.737 | yes |
+| logreg_baseline | logistic regression, C=1.0 | 0.827 | 0.498 | 0.747 | yes |
+| gradient_boosting | 300 trees, lr 0.05, depth 3 | 0.821 | 0.497 | 0.374 | no |
+| rf_500_deep | random forest, 500 trees, depth 14 | 0.810 | 0.278 | 0.168 | no |
+| rf_200 | random forest, 200 trees, depth 8 | 0.797 | 0.497 | 0.490 | no |
 
 ![mlflow runs](reports/mlflow_runs.png)
 
-Logistic regression with `class_weight=balanced` does best overall. Dropping the three "rate" columns helped a little, they seem to be mostly noise. Gradient boosting has the same ROC AUC but almost no recall at a 0.5 cutoff because it isn't class weighted, and the deep random forest with no leaf-size limit overfits and barely predicts any leavers (recall 0.11).
+`compare_experiments.py` picks the run with the best validation ROC AUC among those that passed the thresholds, which is `logreg_C0.1`. That model is the one in `configs/config.yaml`. Scored once on the 294 row test split it gets:
+
+| ROC AUC | F1 | precision | recall | accuracy |
+|---|---|---|---|---|
+| 0.810 | 0.500 | 0.395 | 0.681 | 0.782 |
+
+A few notes. The three logistic regression variants are within 0.004 ROC AUC of each other on validation, which is well inside the noise for a dataset this size, so there is no real evidence that the regularisation strength or dropping the rate columns matters. Logistic regression with `class_weight=balanced` is simply the only family that meets the recall threshold. The tree models have decent ROC AUC but low recall at the 0.5 cutoff: gradient boosting isn't class weighted and the deep random forest with no leaf-size limit overfits and barely predicts any leavers (validation recall 0.17). Tuning the decision threshold on the validation folds would probably help them, that is left as a next step.
 
 ## Tests
 
@@ -95,16 +105,16 @@ pytest tests/ -v
 
 - `test_preprocess.py` - unit tests: imputation of numeric and categorical missing values, one-hot encoding, unseen categories, the input dataframe isn't modified, errors on bad input
 - `test_data.py` - data validation on the real csv: expected columns, target is only Yes/No, numeric ranges, missing values present but limited
-- `test_model.py` - trains on a 500 row sample: prediction type/shape, minimum ROC AUC and recall on the test split, all model types train
+- `test_model.py` - trains on a 500 row sample: prediction type/shape, minimum ROC AUC and recall on the test split, all model types train, the CV helper returns sensible scores
 
-The data and model tests are skipped with a message if `dvc pull` hasn't been run.
+The data and model tests are skipped with a message if `dvc pull` hasn't been run. In CI (`CI` env variable set) they fail instead, so a broken data pull can't hide behind a skip.
 
 ## CI
 
 `.github/workflows/ml-pipeline.yml` runs on pushes and pull requests to `main`:
 
 - **test** - install, `dvc pull`, `pytest tests/ -v`
-- **train** (needs test) - install, `dvc pull`, `python -m src.train`. Fails if the script exits with 1 because a metric is under its threshold. The model and metrics are uploaded as an artifact.
+- **train** (needs test) - install, `dvc pull`, `python -m src.train`. Fails if the script exits with 1 because a validation metric is under its threshold. The model and metrics are uploaded as an artifact.
 
 ## Drift monitoring
 

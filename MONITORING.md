@@ -42,23 +42,23 @@ Two features drifted that the simulation did not touch: TrainingTimesLastYear an
 
 ## 2. Would this drift affect model performance?
 
-Yes. Because the production set is simulated from the labelled holdout we can actually measure it with the baseline logistic regression:
+Yes. Because the production set is simulated from the labelled holdout we can actually measure it with the selected model (logistic regression, C=0.1):
 
 | metric | clean holdout | simulated production |
 |---|---|---|
-| ROC AUC | 0.803 | 0.759 |
-| F1 | 0.462 | 0.398 |
-| precision | 0.361 | 0.281 |
-| recall | 0.638 | 0.681 |
-| accuracy | 0.762 | 0.670 |
+| ROC AUC | 0.810 | 0.774 |
+| F1 | 0.500 | 0.444 |
+| precision | 0.395 | 0.313 |
+| recall | 0.681 | 0.766 |
+| accuracy | 0.782 | 0.694 |
 
-OverTime and BusinessTravel are two of the strongest predictors in the model, so when a lot of employees switch to overtime and frequent travel their predicted risk goes up even though in the simulation nobody actually changed their mind about leaving. The model flags many more people, recall goes up a bit but precision drops and F1 falls below the 0.40 minimum that the CI pipeline requires. In practice HR would get a lot more false alarms.
+OverTime and BusinessTravel are two of the strongest predictors in the model, so when a lot of employees switch to overtime and frequent travel their predicted risk goes up even though in the simulation nobody actually changed their mind about leaving. The model flags many more people: recall goes up, but precision drops by a fifth, accuracy drops 9 points and F1 ends up only just above the 0.40 minimum the pipeline requires. In practice HR would get a lot more false alarms.
 
 One caveat: the simulation shifts the inputs but keeps the labels. In reality more overtime and longer commutes would probably also make more people leave, so some of those new "at risk" predictions could turn out to be right. We can't know that until real attrition labels come in, which takes months.
 
 ## 3. Recommended action
 
-Investigate first, then retrain. Just continuing to monitor isn't enough because the measured F1 is already below the deployment minimum.
+Investigate first, then retrain. Just continuing to monitor isn't enough: precision has already dropped a lot and F1 is sitting right at the deployment minimum.
 
 1. Check that the shifts are real and not a data problem. Confirm with HR that there was a pay review, an office move and a busy period. Check that MonthlyIncome is still in the same currency and DistanceFromHome still in miles - a unit change upstream would look exactly like this.
 2. In the meantime raise the decision threshold, or give HR a ranked list of risk scores instead of a yes/no flag, so the extra false positives do less damage.
