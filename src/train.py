@@ -2,8 +2,13 @@
 
     python -m src.train --config configs/config.yaml
 
-Exits with code 1 if the model does not meet the thresholds in the config,
-which is what fails the training job in CI.
+Metrics are computed two ways:
+  * val_*  - mean over stratified k-fold cross-validation on the training split.
+             These are used to compare experiments and to check the thresholds.
+  * test_* - the held-out test split, scored once with the final model.
+
+Exits with code 1 if the validation metrics do not meet the thresholds in the
+config, which is what fails the training job in CI.
 """
 
 import argparse
@@ -14,8 +19,10 @@ from pathlib import Path
 import joblib
 import mlflow
 import mlflow.sklearn
+from sklearn.base import clone
 from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import StratifiedKFold, cross_validate
 from sklearn.pipeline import Pipeline
 
 from src.config import load_config
@@ -52,6 +59,14 @@ def build_pipeline(cfg, numeric_cols, categorical_cols):
     ])
 
 
+def cross_validate_pipeline(pipeline, X, y, n_folds=5, random_state=42):
+    """Mean validation metrics over stratified k-fold CV (the pipeline is refit per fold)."""
+    cv = StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=random_state)
+    scoring = ["roc_auc", "f1", "precision", "recall", "accuracy"]
+    scores = cross_validate(clone(pipeline), X, y, cv=cv, scoring=scoring)
+    return {name: scores[f"test_{name}"].mean() for name in scoring}
+
+
 def train(cfg, run_name=None, save_outputs=True):
     data_cfg = cfg["data"]
     target = data_cfg["target"]
@@ -82,12 +97,23 @@ def train(cfg, run_name=None, save_outputs=True):
         mlflow.log_param("n_features", len(numeric_cols) + len(categorical_cols))
         mlflow.log_param("dropped_columns", ",".join(data_cfg["drop_columns"]))
 
-        pipeline.fit(X_train, y_train)
-        metrics = evaluate_model(pipeline, X_test, y_test)
-        mlflow.log_metrics(metrics)
+        mlflow.log_param("cv_folds", cfg["cv_folds"])
+        # experiment runs vs the final model trained from config.yaml
+        mlflow.set_tag("stage", "experiment" if not save_outputs else "final")
 
-        failures = check_thresholds(metrics, cfg["thresholds"])
+        # validation metrics on the training split only, this is what experiments
+        # are compared on
+        val_metrics = cross_validate_pipeline(
+            pipeline, X_train, y_train, cfg["cv_folds"], data_cfg["random_state"]
+        )
+        mlflow.log_metrics({f"val_{k}": v for k, v in val_metrics.items()})
+        failures = check_thresholds(val_metrics, cfg["thresholds"])
         mlflow.set_tag("passed_thresholds", str(not failures))
+
+        # final fit on the whole training split, test split scored once
+        pipeline.fit(X_train, y_train)
+        test_metrics = evaluate_model(pipeline, X_test, y_test)
+        mlflow.log_metrics({f"test_{k}": v for k, v in test_metrics.items()})
 
         # mlflow 3 saves sklearn models with skops and wants the non-sklearn
         # types inside the pipeline listed explicitly
@@ -105,9 +131,10 @@ def train(cfg, run_name=None, save_outputs=True):
         joblib.dump(pipeline, out["model_path"])
         Path(out["metrics_path"]).parent.mkdir(parents=True, exist_ok=True)
         with open(out["metrics_path"], "w") as f:
-            json.dump({"run_id": run_id, "data_version": data_version, "metrics": metrics}, f, indent=2)
+            json.dump({"run_id": run_id, "data_version": data_version,
+                       "validation": val_metrics, "test": test_metrics}, f, indent=2)
 
-    return run_id, metrics, failures
+    return run_id, val_metrics, test_metrics, failures
 
 
 def main():
@@ -117,14 +144,15 @@ def main():
     args = parser.parse_args()
 
     cfg = load_config(args.config)
-    run_id, metrics, failures = train(cfg, run_name=args.run_name)
+    run_id, val_metrics, test_metrics, failures = train(cfg, run_name=args.run_name)
 
     print(f"run id: {run_id}")
-    for name, value in metrics.items():
-        print(f"  {name:<10} {value:.4f}")
+    print(f"  {'metric':<10} {'validation':>11} {'test':>8}")
+    for name in val_metrics:
+        print(f"  {name:<10} {val_metrics[name]:>11.4f} {test_metrics[name]:>8.4f}")
 
     if failures:
-        print("model did not meet the thresholds:")
+        print("validation metrics did not meet the thresholds:")
         for msg in failures:
             print("  -", msg)
         sys.exit(1)

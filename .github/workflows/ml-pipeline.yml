@@ -45,7 +45,7 @@ jobs:
 
       # train.py exits with 1 if the metrics are below the thresholds in the config
       - name: Train model and check thresholds
-        run: python -m src.train --config configs/config.yaml
+        run: python -m src.train --config configs/config.yaml --run-name final_model
 
       - name: Upload model and metrics
         uses: actions/upload-artifact@v4

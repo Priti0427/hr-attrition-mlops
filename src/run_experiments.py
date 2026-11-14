@@ -24,10 +24,10 @@ def main():
         cfg["model"] = exp["model"]
         cfg["data"]["drop_columns"] = cfg["data"]["drop_columns"] + exp.get("drop_extra", [])
 
-        _, metrics, failures = train(cfg, run_name=exp["name"], save_outputs=False)
+        _, val, _, failures = train(cfg, run_name=exp["name"], save_outputs=False)
         status = "ok" if not failures else "below threshold"
-        print(f"{exp['name']:<22} roc_auc={metrics['roc_auc']:.4f} "
-              f"f1={metrics['f1']:.4f} recall={metrics['recall']:.4f}  {status}")
+        print(f"{exp['name']:<22} val_roc_auc={val['roc_auc']:.4f} "
+              f"val_f1={val['f1']:.4f} val_recall={val['recall']:.4f}  {status}")
 
 
 if __name__ == "__main__":

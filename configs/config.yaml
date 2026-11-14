@@ -24,11 +24,16 @@ data:
 model:
   type: logistic_regression   # logistic_regression, random_forest, gradient_boosting
   params:
-    C: 1.0
+    C: 0.1
     max_iter: 2000
     class_weight: balanced
 
-# train.py exits with code 1 if the test metrics are below these
+# number of stratified CV folds on the training split. The validation metrics
+# from these folds are used to compare experiments; the test split is only
+# scored once for the final number.
+cv_folds: 5
+
+# train.py exits with code 1 if the validation metrics are below these
 thresholds:
   roc_auc: 0.75
   f1: 0.40

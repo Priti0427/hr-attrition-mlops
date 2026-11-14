@@ -3,7 +3,7 @@ import pytest
 
 from src.evaluate import evaluate_model
 from src.preprocess import clean_data, get_feature_columns, split_data, split_xy
-from src.train import build_model, build_pipeline
+from src.train import build_model, build_pipeline, cross_validate_pipeline
 
 
 @pytest.fixture(scope="module")
@@ -51,3 +51,12 @@ def test_other_model_types_train(config, split, model_type):
 def test_unknown_model_type_raises():
     with pytest.raises(ValueError):
         build_model({"type": "svm"})
+
+
+def test_cross_validation_returns_mean_scores(config, split):
+    X_train, y_train, _, _, num, cat = split
+    pipe = build_pipeline(config, num, cat)
+    scores = cross_validate_pipeline(pipe, X_train, y_train, n_folds=3)
+    assert set(scores) == {"roc_auc", "f1", "precision", "recall", "accuracy"}
+    assert all(0 <= v <= 1 for v in scores.values())
+    assert scores["roc_auc"] > 0.5
