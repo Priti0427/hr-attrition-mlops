@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import numpy as np
@@ -20,6 +21,9 @@ def config():
 def raw_data(config):
     path = Path(config["data"]["path"])
     if not path.exists():
+        # locally it's fine to skip, in CI a missing file means dvc pull failed
+        if os.environ.get("CI"):
+            pytest.fail("dataset not found in CI, did `dvc pull` run?")
         pytest.skip("dataset not found, run `dvc pull` first")
     return pd.read_csv(path, encoding="utf-8-sig")
 
